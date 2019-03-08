@@ -65,7 +65,7 @@ class TemplateGroups extends WireData implements Module {
 		$field->collapsed = count($templateGroups) ? Inputfield::collapsedNo : Inputfield::collapsedYes; 
 		$field->label = $this->_('Limit new pages to groups');
 		$field->description = $this->_('Select group which are allowed to add pages with this template.');
-		$field->description .= ' ' . $this->_("If no groups are selected, no limitation is placed this template, though other family restrictions still apply.");
+		$field->description .= ' ' . $this->_("If no groups are selected, no limitation is placed on this template, though other family restrictions still apply.");
 		$field->attr('value', $templateGroups);
 		foreach($groups as $group) {
 			$field->addOption($group->id, $group->name);

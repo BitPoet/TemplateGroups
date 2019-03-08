@@ -18,6 +18,8 @@ Tested with ProcessWire 3.0
  
 Restrictions entered here will be applied after the regular regular restrictions in the template's family settings are applied, which means you can't make an already excluded template visible in the drop-down list for new page through this method, only disallow otherwise allowed templates.
 
+![Screenshot](https://bitpoet.github.io/img/template-groups.png)
+
 ## License
 
 Released under Mozilla Public License v2. See file LICENSE for details.

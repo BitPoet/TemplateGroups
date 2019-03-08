@@ -1,0 +1,196 @@
+<?php namespace ProcessWire;
+
+class TemplateGroups extends WireData implements Module {
+	
+	protected static $tablename = "template_groups";
+	
+	public static function getModuleInfo() {
+		return [
+			"title"			=>	"Template by Groups",
+			"summary"		=>	"Limit template usage by group (requires UserGroups module)",
+			"version"		=>	"0.0.5",
+			"autoload"		=>	true,
+			"requires"		=>	["ProcessUserGroups"]
+		];
+	}
+
+	public function init() {
+		$this->addHookAfter("Templates::deleted", $this, "templateDeleted");
+		$this->addHookAfter("ProcessPageAdd::getAllowedTemplates", $this, "filterAllowedTemplates");
+		$this->addHookAfter("ProcessTemplate::buildEditForm", $this, "appendGroupFieldToForm");
+		$this->addHookBefore("ProcessTemplate::templateSaved", $this, "saveGroups");
+	}
+	
+	protected function templateDeleted(HookEvent $event) {
+		$template = (int)$event->arguments(0);
+
+		$this->database->exec("DELETE FROM `" . self::$tablename . "` WHERE template_id = $template");
+	}
+	
+	
+	protected function saveGroups(HookEvent $event) {
+		$tpl  = $event->arguments(0);
+		
+		$val = "";
+		if(is_array($this->input->post->templateGroups)) { // foreach($this->input->post->allowedParents as $id) $a[] = (int) $id;
+			$vals = $this->input->post->templateGroups;
+			$val = json_encode($vals);
+		}
+
+		$this->saveTemplateGroups($tpl->id, $val);
+	}
+	
+	
+	protected function saveTemplateGroups($tplid, $val) {
+		$database = $this->wire('database');
+
+		$stmt = $database->prepare("REPLACE INTO `" . self::$tablename . "` (templates_id, data) VALUES (:tplid, :data)")		;
+		$stmt->execute([
+			':tplid'		=>	$tplid,
+			':data'			=>	$val
+		]);
+	}
+	
+	
+	protected function appendGroupFieldToForm(HookEvent $event) {
+		$proctpl = $event->object;
+		$frm = $event->return;
+		$tpl = $event->arguments(0);
+		
+		$groups = $this->pages->find('template=user-group, sort=name');
+		$templateGroups = $this->loadTemplateGroups($tpl->id);
+		
+		$field = $this->modules->get('InputfieldAsmSelect'); 
+		$field->attr('name', 'templateGroups'); 
+		$field->collapsed = count($templateGroups) ? Inputfield::collapsedNo : Inputfield::collapsedYes; 
+		$field->label = $this->_('Limit new pages to groups');
+		$field->description = $this->_('Select group which are allowed to add pages with this template.');
+		$field->description .= ' ' . $this->_("If no groups are selected, no limitation is placed this template, though other family restrictions still apply.");
+		$field->attr('value', $templateGroups);
+		foreach($groups as $group) {
+			$field->addOption($group->id, $group->name);
+		}
+		
+		$familyWrap = $frm->find('id=family')->first();
+		$familyWrap->insertAfter($field, $familyWrap->get('parentTemplates'));
+	}
+	
+	
+	protected function loadTemplateGroups($tpl) {
+		$id = (int)$tpl;
+		$database = $this->wire('database');
+		
+		$stmt = $database->prepare("select data from `" . self::$tablename . "` where templates_id = :id");
+		if(! $stmt->execute([':id' => $id])) return [];
+		
+		$data = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+		$arr = json_decode($data['data']);
+		if(! is_array($arr)) {
+			$arr = [];
+		}
+		return $arr;
+	}
+	
+	protected function filterAllowedTemplates(HookEvent $event) {
+
+		if($this->user->isSuperuser()) return;
+		
+		$parent = $event->arguments(0);
+		if(! $parent || $parent instanceof NullPage) {
+			$parent = wire('pages')->get((int)$this->input->get->parent_id);
+		}
+		if(! $parent || $parent instanceof NullPage) {
+			$parent = wire('pages')->get((int)$this->input->post->parent_id);
+		}
+		if($parent instanceof NullPage) {
+			$this->log->save('templategroups', "PARENT not set, not filtering!");
+			return;
+		}
+		
+		$templates = $event->return;
+		
+		$out = [];
+		
+		foreach($templates as $id => $template) {
+			$access = true;
+			$templateGroups = $this->loadTemplateGroups($id);
+
+			if($templateGroups) {
+
+				$access = false;
+
+				foreach($templateGroups as $grp) {
+					if($this->user->user_groups->has($grp)) {
+						$access = true;
+						break;
+					}
+				}
+			}
+
+			if($access) $out[$id] = $template;
+		}
+		
+		$event->return = $out;
+	}
+
+
+	public function install() {
+		$database = $this->wire('database');
+
+		$sql = $this->getCreateStatement();
+
+		$query = $database->prepare($sql);
+		$result = $query->execute();
+
+		if(!$result) $this->error("Error creating table '{$table}'");				
+	}
+
+
+	public function uninstall() {
+		$database = $this->wire('database');
+
+		$database->exec("DROP TABLE `" . self::$tablename . "`");
+	}
+
+
+	protected function getCreateStatement() {
+		$schema = $this->getDatabaseSchema();
+		
+		$sql = 	"CREATE TABLE `" . self::$tablename . "` (";
+		foreach($schema as $f => $v) {
+			if($f == 'keys' || $f == 'xtra') continue; 
+			$sql .= "`$f` $v, "; 
+		}
+		foreach($schema['keys'] as $v) {
+			$sql .= "$v, ";
+		}
+		
+		$xtra = isset($schema['xtra']) ? $schema['xtra'] : array();
+		if(is_string($xtra)) $xtra = array('append' => $xtra); // backwards compat: xtra used to be a string, what 'append' is now. 
+		$append = isset($xtra['append']) ? $xtra['append'] : '';
+
+		$sql = rtrim($sql, ", ") . ') ' . $append;
+
+		return $sql;
+	}
+	
+	protected function getDatabaseSchema() {
+		$engine = $this->config->dbEngine;
+		$charset = $this->config->dbCharset;
+		
+		$schema = array(
+			'templates_id' => 'int UNSIGNED NOT NULL', 
+			'data' 			=> "MEDIUMTEXT",
+			'keys' 			=> array(
+				'primary' 		=> 'PRIMARY KEY (`templates_id`)'
+			),
+			'xtra' 			=> array(
+				'append' 		=> "ENGINE=$engine DEFAULT CHARSET=$charset",
+			)
+		);
+		
+		return $schema;
+	}
+
+}

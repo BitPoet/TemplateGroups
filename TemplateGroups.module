@@ -8,7 +8,7 @@ class TemplateGroups extends WireData implements Module {
 		return [
 			"title"			=>	"Template by Groups",
 			"summary"		=>	"Limit template usage by group (requires UserGroups module)",
-			"version"		=>	"0.0.5",
+			"version"		=>	"0.0.6",
 			"autoload"		=>	true,
 			"requires"		=>	["ProcessUserGroups"]
 		];
@@ -18,7 +18,7 @@ class TemplateGroups extends WireData implements Module {
 		$this->addHookAfter("Templates::deleted", $this, "templateDeleted");
 		$this->addHookAfter("ProcessPageAdd::getAllowedTemplates", $this, "filterAllowedTemplates");
 		$this->addHookAfter("ProcessTemplate::buildEditForm", $this, "appendGroupFieldToForm");
-		$this->addHookBefore("ProcessTemplate::templateSaved", $this, "saveGroups");
+		$this->addHookAfter("Templates::save", $this, "saveGroups");
 	}
 	
 	protected function templateDeleted(HookEvent $event) {
@@ -29,10 +29,11 @@ class TemplateGroups extends WireData implements Module {
 	
 	
 	protected function saveGroups(HookEvent $event) {
+		if(! $this->page->process === "ProcessTemplate") return;
 		$tpl  = $event->arguments(0);
 		
 		$val = "";
-		if(is_array($this->input->post->templateGroups)) { // foreach($this->input->post->allowedParents as $id) $a[] = (int) $id;
+		if(is_array($this->input->post->templateGroups)) {
 			$vals = $this->input->post->templateGroups;
 			$val = json_encode($vals);
 		}
